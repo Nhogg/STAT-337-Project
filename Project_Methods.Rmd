@@ -21,3 +21,13 @@ covid_data <- data.frame(
 
 raw_data <- rep(covid_data$secondary_cases, covid_data$frequency)
 ```
+
+# ZIP Distributions
+
+# Negative Binomial Distribution
+
+# Beta-Poisson Mixture Modeling
+
+# Maximum Likelihood Estimation
+
+# Branching Process
