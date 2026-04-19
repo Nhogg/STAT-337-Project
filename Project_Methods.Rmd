@@ -29,11 +29,35 @@ colnames(freq_table) <- c("secondary_cases", "frequency")
 
 print(freq_table)
 
+freq_table$secondary_cases <- as.integer(as.character(freq_table$secondary_cases))
 raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
+
+
 ```
 
 # ZIP Distributions
 Application of Zero Inflated Poisson (ZIP) distribution to model the number of secondary cases per infector, accounting for excess zeros in the data.
+## Results
+Lambda (Poisson Mean): 1.398481 
+Sigma (Zero-Inflation Probability): 0.5047316 
+Log-Likelihood: -295.6031 
+AIC: 595.2061 
+Overall mean (lambda * (1 - sigma)): 0.6926233 
+## Interpretation
+The estimated Poisson Mean (Lambda) of approximately 1.398 suggests that, on average, an infector is expected to cause about 1.398 secondary cases in the absence of zero-inflation.
+The Zero-Inflation Probability (Sigma) of approximately 0.505 indicates that about 50.5% of cases are "structural zeros", meaning they are not expected to cause any secondary cases
+due to factors such as isolation, hospitalization, or other interventions.
+The overall mean number serves as the effective reproduction number (R), which matches with Adam et al.'s estimate of R = 0.69. This suggests that, on average, each infector is expected
+to cause less than one secondary case, indicating that the outbreak may be under control in this population.
+The Akaike Information Criterium (AIC) will be used to compare the fit of the ZIP model to other models to determine which one best captures the distribution of secondary cases in the data.
+Finally, we can check the prediction of the model by evaluating the predicted zeros against the observed zeros in the data:
+
+\begin{align}
+P(X=0) = \sigma + (1 - \sigma) \cdot e^{-\lambda} = 0.505 + 0.495 \cdot e^{-1.398} \approx 0.505 + 0.495 \cdot 0.247 = 0.505 + 0.122 = 0.627
+\end{align}
+
+As seen here, the model's prediction was correct within the observed data, which had a zero proportion of approximately 0.63. This suggests that the ZIP model is a good fit for the data, capturing the excess zeros effectively.
+
 ```{r}
 
 # Log-Likelihood Function
@@ -42,7 +66,7 @@ zip_loglik <- function(params, data) {
   sigma <- params[2]  # Zero-inflation probability
   
   # Constraints: lambda > 0, 0 < sigma < 1
-  if (lambda <= 0 || sigma <- 0 || sigma >= 1) return(-Inf)
+  if (lambda <= 0 || sigma <= 0 || sigma >= 1) return(-Inf)
   
   zeros <- data[data == 0]
   nonzeros <- data[data > 0]
@@ -52,7 +76,65 @@ zip_loglik <- function(params, data) {
   
   # Log-Likelihood for non-zeros: log(1 - sigma) + log(Poisson probability)
   ll_nonzeros <- sum(log(1 - sigma) + dpois(nonzeros, lambda, log=TRUE))
+  
+  return(ll_zeros + ll_nonzeros)
 }
+
+# Negative log-likelihood for optim 
+zip_negloglik <- function(params, data) {
+  return(-zip_loglik(params, data))
+}
+
+# Fit the model
+fit_zip <- function(data) {
+  # Starting values
+  p_zero <- mean(data == 0)
+  start_sigma <- max(0.01, min(0.99, p_zero - 0.1))
+  start_lambda <- mean(data) / (1 - start_sigma)
+  
+  result <- optim(
+    par = c(start_lambda, start_sigma),
+    fn = zip_negloglik,
+    data = data,
+    method = "L-BFGS-B",
+    lower = c(1e-6, 1e-6),
+    upper = c(Inf, 1 - 1e-6),
+    hessian = TRUE
+  )
+  
+  lambda_hat <- result$par[1]
+  sigma_hat <- result$par[2]
+  loglik <- -result$value
+  aic <- 2 * 2 - 2 * loglik # 2 params
+  
+  cat("Lambda (Poisson Mean):", lambda_hat, "\n")
+  cat("Sigma (Zero-Inflation Probability):", sigma_hat, "\n")
+  cat("Log-Likelihood:", loglik, "\n")
+  cat("AIC:", aic, "\n")
+  cat("Overall mean (lambda * (1 - sigma)):", lambda_hat * (1 - sigma_hat), "\n")
+  
+  return(list(lambda = lambda_hat, sigma = sigma_hat, loglik = loglik, aic = aic, fit = result))
+}
+
+# Run on raw data
+zip_result <- fit_zip(raw_data)
+
+# Check predicted vs. observed zeros
+n <- length(raw_data)
+observed_zero_prop <- mean(raw_data == 0)
+
+lambda <- zip_result$lambda
+sigma <- zip_result$sigma
+
+predicted_zero_prop <- sigma + (1 - sigma) * exp(-lambda)
+
+cat("lambda:", lambda, "\n")
+cat("sigma:", sigma, "\n")
+cat("Observed Zero Proportion:", observed_zero_prop, "\n")
+cat("Predicted Zero Proportion:", predicted_zero_prop, "\n")
+cat("Observed zero count:", sum(raw_data == 0), "out of", n, "\n")
+cat("Predicted zero count:", round(predicted_zero_prop * n), "out of", n, "\n")
+
 
 
 ```
