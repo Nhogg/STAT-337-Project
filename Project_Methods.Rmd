@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Define Data
-Adam et al. "Clustering and superspreading potential of SARS-C-oV-2 in-fections in Hong Kong".
+Adam et al. "Clustering and superspreading potential of SARS-C-oV-2 infections in Hong Kong".
 In:Nature Medicine(2020).doi:https://doi.org/10.1038/s41591-020-1092-0. 
 
 ```{r}
@@ -33,7 +33,29 @@ raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
 ```
 
 # ZIP Distributions
+Application of Zero Inflated Poisson (ZIP) distribution to model the number of secondary cases per infector, accounting for excess zeros in the data.
+```{r}
 
+# Log-Likelihood Function
+zip_loglik <- function(params, data) {
+  lambda <- params[1] # Poisson mean
+  sigma <- params[2]  # Zero-inflation probability
+  
+  # Constraints: lambda > 0, 0 < sigma < 1
+  if (lambda <= 0 || sigma <- 0 || sigma >= 1) return(-Inf)
+  
+  zeros <- data[data == 0]
+  nonzeros <- data[data > 0]
+  
+  # Log-Likelihood for zeros: log(sigma + (1 - sigma) * exp(-lambda))
+  ll_zeros <- length(zeros) * log(sigma + (1 - sigma) * exp(-lambda))
+  
+  # Log-Likelihood for non-zeros: log(1 - sigma) + log(Poisson probability)
+  ll_nonzeros <- sum(log(1 - sigma) + dpois(nonzeros, lambda, log=TRUE))
+}
+
+
+```
 # Negative Binomial Distribution
 
 # Beta-Poisson Mixture Modeling
