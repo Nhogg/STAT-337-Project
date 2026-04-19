@@ -14,12 +14,22 @@ Adam et al. "Clustering and superspreading potential of SARS-C-oV-2 in-fections 
 In:Nature Medicine(2020).doi:https://doi.org/10.1038/s41591-020-1092-0. 
 
 ```{r}
-covid_data <- data.frame(
-  secondary_cases = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 17),
-  frequency = c(1241, 511, 160, 71, 33, 15, 7, 3, 2, 3, 1, 1, 1, 1)
-)
+pairs <- read.csv("transmission_pairs.csv")
 
-raw_data <- rep(covid_data$secondary_cases, covid_data$frequency)
+infector_counts <- table(pairs$infector.case)
+
+all_infectees <- unique(pairs$infectee.case)
+all_infectors <- unique(pairs$infector.case)
+terminal_cases <- setdiff(all_infectees, all_infectors)
+
+secondary_cases <- c(as.integer(infector_counts), rep(0, length(terminal_cases)))
+
+freq_table <- as.data.frame(table(secondary_cases))
+colnames(freq_table) <- c("secondary_cases", "frequency")
+
+print(freq_table)
+
+raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
 ```
 
 # ZIP Distributions
