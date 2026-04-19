@@ -10,9 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Define Data
-Sourced from:
-Zhang et al. (2020) — "Low dispersion in the infectiousness of COVID-19 cases implies difficulty in control" in BMC Public Health
-Link: https://link.springer.com/article/10.1186/s12889-020-09624-2
+Adam et al. "Clustering and superspreading potential of SARS-C-oV-2 in-fections in Hong Kong".
+In:Nature Medicine(2020).doi:https://doi.org/10.1038/s41591-020-1092-0. 
+
 ```{r}
 covid_data <- data.frame(
   secondary_cases = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 17),
