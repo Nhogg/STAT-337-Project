@@ -141,7 +141,109 @@ cat("Predicted zero count:", round(predicted_zero_prop * n), "out of", n, "\n")
 # Negative Binomial Distribution
 
 # Beta-Poisson Mixture Modeling
+```{r}
+# Beta-Poisson Mixture Model
+bp_pmf <- function(x, lambda, phi, nu) {
+  N <- 1 / nu
+  alpha1 <- lambda * phi
+  alpha2 <- (N - lambda) * phi
+  
+  if (alpha1 <= 0 || alpha2 <= 0 || N <= lambda) return(rep(-Inf, length(x)))
+  
+  sapply(x, function(k) {
+    f <- function(p) dpois(k, lambda = p * N) * dbeta(p, alpha1, alpha2)
+    val <- tryCatch(integrate(f, 0, 1, rel.tol = 1e-8)$value,
+                    error = function(e) 0)
+    if (val <= 0) return(-Inf)
+    log(val)
+  })
+}
+
+bp_negloglik <- function(params, data, lambda) {
+  phi <- params[1]
+  nu <- params[2]
+  if (phi <= 0 || nu <= 0 || nu >= 1/lambda) return(1e10)
+  ll <- sum(bp_pmf(data, lambda, phi, nu))
+  if (is.na(ll) || is.infinite(ll)) return(1e10)
+  return(-ll)
+}
+
+fit_bp <- function(data) {
+  lambda <- mean(data)
+  best <- list(value = 1e10)
+  
+  for (sp in c(0.1, 0.5, 1, 5)) {
+    for (sn in c(0.01, 0.1, 0.5)) {
+      sv <- sn / lambda
+      if (sv >= 1/lambda) next
+      
+      res <- tryCatch(
+        optim(c(sp, sv), bp_negloglik, data = data, lambda = lambda,
+              method = "L-BFGS-B",
+              lower = c(1e-6, 1e-8),
+              upper = c(100, 1/lambda - 1e-6)),
+        error = function(e) list(value = 1e10))
+      
+      if (res$value < best$value) best <- res
+    }
+  }
+  
+  phi_hat <- best$par[1]
+  nu_hat <- best$par[2]
+  N_hat <- 1 / nu_hat
+  loglik <- -best$value
+  aic <- 6 - 2 * loglik
+  
+  cat("Beta-Poisson MLE Results\n")
+  cat("Lambda (mean):", lambda, "\n")
+  cat("Phi (overdispersion):", phi_hat, "\n")
+  cat("Nu (inverse contacts):", nu_hat, "\n")
+  cat("N (mean contacts):", N_hat, "\n")
+  cat("Log-likelihood:", loglik, "\n")
+  cat("AIC:", aic, "\n")
+  
+  # Check if converged to negative binomial limit
+  if (nu_hat < 0.01) {
+    cat("\nNote: Nu ≈ 0 (N → ∞), beta-Poisson has converged to its\n")
+    cat("negative binomial limit with theta =", 1/phi_hat, "\n")
+  }
+  
+  return(list(lambda = lambda, phi = phi_hat, nu = nu_hat,
+              N = N_hat, loglik = loglik, aic = aic))
+}
+
+bp_result <- fit_bp(raw_data)
+
+```
 
 # Maximum Likelihood Estimation
 
 # Branching Process
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
