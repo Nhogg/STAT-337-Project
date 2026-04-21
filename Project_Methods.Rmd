@@ -3,6 +3,7 @@ title: "Project_Methods"
 author: "Nathan Hogg"
 date: "2026-04-15"
 output: pdf_document
+latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
@@ -141,6 +142,42 @@ cat("Predicted zero count:", round(predicted_zero_prop * n), "out of", n, "\n")
 # Negative Binomial Distribution
 
 # Beta-Poisson Mixture Modeling
+Application of the Beta-Poisson mixture model to secondary case data.
+This model decomposes transmission into a Poisson-distributed contact process and a Beta-distributed infection probability, allowing for individual
+level variation in infectiousness. The beta-Poison generalizes the negative binomial distribution and is the central
+methodological contribution of Hilton & Hall.
+
+## Results
+Lambda (mean): 0.692623
+Phi (overdispersion): 0.804689
+Nu (inverse contacts): 0.0004845876
+N (mean contacts): 2063.61
+Log-likelihood: -276.2956
+AIC: 558.5912\
+
+## Interpretation
+The mean number of secondary cases ($\lambda$) is fixed at the sample mean of approximately 0.693, consistent
+with a subcritical outbreak where each case generates fewer than one secondary infection on average.
+
+The overdispersion parameter ($\phi$) of approximately 0.805 governs the shape of the beta distribution from which individual
+transmission probabilities are drawn. This corresponds to an implied negative binomial dispersion of
+$\theta = \phi^{-1}=1.243$, indicating substantial individual-level heterogeneity in infectiousness, with some individuals being much more likely to transmit than others.
+
+The inverse contact parameter ($N$) converged to approximately 0.0005, corresponding to $N \approx 2064$ mean contacts. this near-zero value of Nu indicates that the beta-Poisson
+has collapsed to its negative binomial limit. In this limit ($N \to \infty$), the beta-distributed transmission probability scaled by $N$ converges to a gamma distribution, and the model
+becomes equivalent to a negative binomial with mean $\lambda$ and dispersion $\theta = \phi^{-1}$:
+
+\begin{align}
+\lim_{N \to \infty} \text{BetaPoi}(\lambda, \Phi, N) = \text{NegBin}\left(\lambda, \theta = \frac{1}{\Phi}\right)
+\end{align}
+This result is consistent with the findings of Hilton and Hall (2024), who observed that the beta-Poisson converged to its negative binomial limit for the 
+majority of their eight outbreak datasets. While the beta-Poisson achieved a substantially better fit than the ZIP model ($AIC=558.59$ vs. $595.21$), the improvement is driven
+by the model's ability to capture over dispersion through its negative binomial limit rather than by the additional contact parameter $N$. 
+
+The beta-Poisson's AIC of 558.59 includes a penalty for 3 parameters ($k = 3$; $\lambda$, $\phi$, $\nu$), compared to only 2 for the negative binomial. Since
+the beta-Poisson has effectively reduced to the negative binomial here, we expect the negative binomial to achieve a similar log-likelihood with a lower AIC, making it the more parsimonious choice,
+again consistent with Hilton and Hall's (2024) finding.
+
 ```{r}
 # Beta-Poisson Mixture Model
 bp_pmf <- function(x, lambda, phi, nu) {
@@ -204,7 +241,7 @@ fit_bp <- function(data) {
   
   # Check if converged to negative binomial limit
   if (nu_hat < 0.01) {
-    cat("\nNote: Nu ≈ 0 (N → ∞), beta-Poisson has converged to its\n")
+    cat("\nNote: Nu ~ 0 (N → infty), beta-Poisson has converged to its\n")
     cat("negative binomial limit with theta =", 1/phi_hat, "\n")
   }
   
@@ -212,7 +249,7 @@ fit_bp <- function(data) {
               N = N_hat, loglik = loglik, aic = aic))
 }
 
-bp_result <- fit_bp(raw_data)
+#bp_result <- fit_bp(raw_data)
 
 ```
 
