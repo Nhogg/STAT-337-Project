@@ -139,44 +139,9 @@ cat("Predicted zero count:", round(predicted_zero_prop * n), "out of", n, "\n")
 
 
 ```
-# Negative Binomial Distribution
+
 
 # Beta-Poisson Mixture Modeling
-Application of the Beta-Poisson mixture model to secondary case data.
-This model decomposes transmission into a Poisson-distributed contact process and a Beta-distributed infection probability, allowing for individual
-level variation in infectiousness. The beta-Poison generalizes the negative binomial distribution and is the central
-methodological contribution of Hilton & Hall.
-
-## Results
-Lambda (mean): 0.692623
-Phi (overdispersion): 0.804689
-Nu (inverse contacts): 0.0004845876
-N (mean contacts): 2063.61
-Log-likelihood: -276.2956
-AIC: 558.5912\
-
-## Interpretation
-The mean number of secondary cases ($\lambda$) is fixed at the sample mean of approximately 0.693, consistent
-with a subcritical outbreak where each case generates fewer than one secondary infection on average.
-
-The overdispersion parameter ($\phi$) of approximately 0.805 governs the shape of the beta distribution from which individual
-transmission probabilities are drawn. This corresponds to an implied negative binomial dispersion of
-$\theta = \phi^{-1}=1.243$, indicating substantial individual-level heterogeneity in infectiousness, with some individuals being much more likely to transmit than others.
-
-The inverse contact parameter ($N$) converged to approximately 0.0005, corresponding to $N \approx 2064$ mean contacts. this near-zero value of Nu indicates that the beta-Poisson
-has collapsed to its negative binomial limit. In this limit ($N \to \infty$), the beta-distributed transmission probability scaled by $N$ converges to a gamma distribution, and the model
-becomes equivalent to a negative binomial with mean $\lambda$ and dispersion $\theta = \phi^{-1}$:
-
-\begin{align}
-\lim_{N \to \infty} \text{BetaPoi}(\lambda, \Phi, N) = \text{NegBin}\left(\lambda, \theta = \frac{1}{\Phi}\right)
-\end{align}
-This result is consistent with the findings of Hilton and Hall (2024), who observed that the beta-Poisson converged to its negative binomial limit for the 
-majority of their eight outbreak datasets. While the beta-Poisson achieved a substantially better fit than the ZIP model ($AIC=558.59$ vs. $595.21$), the improvement is driven
-by the model's ability to capture over dispersion through its negative binomial limit rather than by the additional contact parameter $N$. 
-
-The beta-Poisson's AIC of 558.59 includes a penalty for 3 parameters ($k = 3$; $\lambda$, $\phi$, $\nu$), compared to only 2 for the negative binomial. Since
-the beta-Poisson has effectively reduced to the negative binomial here, we expect the negative binomial to achieve a similar log-likelihood with a lower AIC, making it the more parsimonious choice,
-again consistent with Hilton and Hall's (2024) finding.
 
 ```{r}
 # Beta-Poisson Mixture Model
@@ -253,10 +218,153 @@ fit_bp <- function(data) {
 
 ```
 
+# MLE
+```{r}
+# Negative Binomial MLE
+lambda_nb <- mean(raw_data)
+
+nb_negloglik <- function(theta, data) {
+  -sum(dnbinom(data, size = theta, mu = mean(data), log = TRUE))
+}
+
+nb_fit <- optim(par = 1, fn = nb_negloglik, data = raw_data, method = "L-BFGS-B", lower = 1e-6)
+
+theta_hat <- nb_fit$par
+loglik_nb <- -nb_fit$value
+aic_nb <- 2 * 1 - 2 * loglik_nb
+cat("Negative Binomial MLE Results\n")
+cat("Lambda (mean):", lambda_nb, "\n")
+cat("Theta (overdispersion):", theta_hat, "\n")
+cat("Log-likelihood:", loglik_nb, "\n")
+cat("AIC:", aic_nb, "\n")
+
+# Poisson MLE
+lambda_poi <- mean(raw_data)
+loglik_poi <- sum(dpois(raw_data, lambda_poi, log = TRUE))
+aic_poi <- 2 * 1 - 2 * loglik_poi
+
+cat("\nPoisson MLE Results\n")
+cat("Lambda (mean):", lambda_poi, "\n")
+cat("Log-likelihood:", loglik_poi, "\n")
+cat("AIC:", aic_poi, "\n")
+
+# Geometric MLE
+lambda_geo <- mean(raw_data)
+loglik_geo <- sum(dgeom(raw_data, prob = 1/(1 + lambda_geo), log = TRUE))
+aic_geo <- 2 * 1 - 2 * loglik_geo
+
+cat("\nGeometric MLE Results\n")
+cat("Lambda (mean):", lambda_geo, "\n")
+cat("Log-likelihood:", loglik_geo, "\n")
+cat("AIC:", aic_geo, "\n")
+
+# Model comparison table
+cat("\n AIC Comparison \n")
+comparison <- data.frame(
+  Model = c("Poisson", "Geometric", "Neg Binomial", "ZIP", "Beta-Poisson"),
+  Parameters = c(1, 1, 2, 2, 3),
+  LogLik = c(loglik_poi, loglik_geo, loglik_nb, 
+             zip_result$loglik, bp_result$loglik),
+  AIC = c(aic_poi, aic_geo, aic_nb, 
+          zip_result$aic, bp_result$aic)
+)
+comparison <- comparison[order(comparison$AIC), ]
+print(comparison, row.names = FALSE)
+
+```
+
+
 # Maximum Likelihood Estimation
 
 # Branching Process
+```{r}
+# Branching Process Simulation
 
+# Simulate one outbreak using a given offspring distribution
+simulate_outbreak <- function(rfunc, n_gen = 20, n_index = 1) {
+  cases_per_gen <- numeric(n_gen)
+  cases_per_gen[1] <- n_index
+  total_cases <- n_index
+  
+  for (g in 2:n_gen) {
+    if (cases_per_gen[g - 1] == 0) break
+    new_cases <- sum(rfunc(cases_per_gen[g - 1]))
+    cases_per_gen[g] <- new_cases
+    total_cases <- total_cases + new_cases
+  }
+  return(list(total = total_cases, by_gen = cases_per_gen))
+}
+
+# Random draw functions for each fitted model
+r_zip <- function(n) {
+  lambda <- zip_result$lambda
+  sigma <- zip_result$sigma
+  is_zero <- rbinom(n, 1, sigma)
+  ifelse(is_zero, 0, rpois(n, lambda))
+}
+
+r_betapois <- function(n) {
+  lambda <- bp_result$lambda
+  phi <- bp_result$phi
+  nu <- bp_result$nu
+  N <- 1 / nu
+  alpha1 <- lambda * phi
+  alpha2 <- (N - lambda) * phi
+  p <- rbeta(n, alpha1, alpha2)
+  rpois(n, p * N)
+}
+
+n_sims <- 10000
+n_gen <- 20
+
+zip_sizes <- numeric(n_sims)
+bp_sizes <- numeric(n_sims)
+
+set.seed(42)
+
+for (i in 1:n_sims) {
+  zip_sizes[i] <- simulate_outbreak(r_zip, n_gen)$total
+  bp_sizes[i] <- simulate_outbreak(r_betapois, n_gen)$total
+}
+
+# Summary statistics
+cat("Branching Process Results (", n_sims, "simulations)\n\n")
+
+cat("--- ZIP ---\n")
+cat("Mean outbreak size:", mean(zip_sizes), "\n")
+cat("Median outbreak size:", median(zip_sizes), "\n")
+cat("Max outbreak size:", max(zip_sizes), "\n")
+cat("P(extinction by gen", n_gen, "):", mean(zip_sizes < 50), "\n")
+cat("P(outbreak > 10 cases):", mean(zip_sizes > 10), "\n\n")
+
+cat("--- Beta-Poisson ---\n")
+cat("Mean outbreak size:", mean(bp_sizes), "\n")
+cat("Median outbreak size:", median(bp_sizes), "\n")
+cat("Max outbreak size:", max(bp_sizes), "\n")
+cat("P(extinction by gen", n_gen, "):", mean(bp_sizes < 50), "\n")
+cat("P(outbreak > 10 cases):", mean(bp_sizes > 10), "\n\n")
+
+# Superspreading analysis (Lloyd-Smith et al. definition)
+# Superspreader = generates cases above 99th percentile of Poisson(R)
+R <- mean(raw_data)
+ss_threshold <- qpois(0.99, R)
+cat("=== Superspreading Analysis ===\n")
+cat("R (mean):", R, "\n")
+cat("Superspreading threshold (99th %ile of Poi(R)):", ss_threshold, "\n")
+cat("Observed superspreaders:", sum(raw_data > ss_threshold), "/", length(raw_data), "\n")
+cat("Observed superspreader proportion:", mean(raw_data > ss_threshold), "\n")
+
+# Plot outbreak size distributions
+par(mfrow = c(1, 2))
+hist(zip_sizes, breaks = 50, main = "ZIP: Outbreak Sizes",
+     xlab = "Total cases", col = "steelblue", border = "white")
+abline(v = mean(zip_sizes), col = "red", lwd = 2, lty = 2)
+
+hist(bp_sizes, breaks = 50, main = "Beta-Poisson: Outbreak Sizes",
+     xlab = "Total cases", col = "darkorange", border = "white")
+abline(v = mean(bp_sizes), col = "red", lwd = 2, lty = 2)
+
+```
 
 
 
