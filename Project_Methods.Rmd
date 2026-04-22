@@ -214,7 +214,7 @@ fit_bp <- function(data) {
               N = N_hat, loglik = loglik, aic = aic))
 }
 
-#bp_result <- fit_bp(raw_data)
+bp_result <- fit_bp(raw_data)
 
 ```
 
@@ -231,7 +231,7 @@ nb_fit <- optim(par = 1, fn = nb_negloglik, data = raw_data, method = "L-BFGS-B"
 
 theta_hat <- nb_fit$par
 loglik_nb <- -nb_fit$value
-aic_nb <- 2 * 1 - 2 * loglik_nb
+aic_nb <- 2 * 2 - 2 * loglik_nb
 cat("Negative Binomial MLE Results\n")
 cat("Lambda (mean):", lambda_nb, "\n")
 cat("Theta (overdispersion):", theta_hat, "\n")
