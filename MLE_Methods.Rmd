@@ -1,0 +1,75 @@
+---
+title: "MLE_Methods"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+date: "2026-04-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Maximum Likelihood Estimation
+
+MLE can be used to determine the best parameters for each of the models for the best fit of the data. The Beta-Poisson model is considered more complex because of its additional parameter. However, the model may not be that much better than a simpler version when considering factors such as overfitting and AIC.
+
+Comparing AIC for three models: Poisson, Negative Binomial, and Beta-Poisson
+The standard Poisson model had the highest AIC (310.11), indicating that the data is overdispersed (due to superspreaders)."Furthermore, the results show that even with the extra parameter, the Beta-Poisson model had a higher AIC (308.96) than the negative binomial model, and ultimately showed that negative binomial (306.96) is the more parsimonious model.
+```{r}
+transmissiondata <- read.csv("transmission_pairs.csv")
+data_vec <- aggregate(infectee.case ~ infector.case,data = transmissiondata,FUN = length)
+colnames(data_vec)<- c("infector.case", "secondary_cases")
+```
+
+```{r}
+library(MASS)
+
+y <- data_vec$secondary_cases
+
+#Poisson Model
+fit_pois <- glm(y ~ 1, family = "poisson")
+aic_pois <- AIC(fit_pois)
+
+#Negative Binomial Model
+fit_nb <- glm.nb(y ~ 1)
+aic_nb <- AIC(fit_nb)
+
+cat("Poisson AIC:", aic_pois, "\n")
+cat("Neg Binomial AIC:", aic_nb, "\n")
+```
+```{r}
+library(hypergeo)
+
+beta_pois_nll <- function(params, data) {
+  lambda <- params[1]
+  phi    <- params[2]
+  N      <- params[3]
+  
+  if (lambda <= 0 || phi <= 0 || N <= lambda) return(1e10)
+  
+  a1 <- lambda * phi
+  a2 <- (N - lambda) * phi
+  
+  log_probs <- sapply(data, function(x) {
+    log_const <- x * log(N) - lfactorial(x)
+    
+    log_beta_ratio <- (lbeta(a1 + x, a2) - lbeta(a1, a2))
+    f1f1 <- Re(genhypergeo(U = a1 + x, L = a1 + a2 + x, z = -N))
+    
+    return(log_const + log_beta_ratio + log(f1f1 + 1e-10))
+  })
+  
+  return(-sum(log_probs))
+}
+
+#Beta-Poisson Model
+fit_bp <- optim(par = c(mean(y), 1, max(y) + 1), 
+                fn = beta_pois_nll, 
+                data = y,
+                method = "Nelder-Mead")
+
+aic_bp <- 2 * 3 + 2 * fit_bp$value
+cat("Beta-Poisson AIC:", aic_bp, "\n")
+```
