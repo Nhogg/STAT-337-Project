@@ -7,13 +7,6 @@ date: "2026-04-19"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-#manually calculating theta gets smaller value--- 3.1, due to the outliers in data 
-x <- counts$secondary_cases
-lambda_hat <- mean(x)
-var_hat <- var(x)
-
-theta_hat <- lambda_hat^2 / (var_hat - lambda_hat)
-theta_hat
 ```{r}
 
 #Negative Binomial Test
