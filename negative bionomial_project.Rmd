@@ -7,34 +7,53 @@ date: "2026-04-19"
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+#manually calculating theta gets smaller value--- 3.1, due to the outliers in data 
+x <- counts$secondary_cases
+lambda_hat <- mean(x)
+var_hat <- var(x)
 
+theta_hat <- lambda_hat^2 / (var_hat - lambda_hat)
+theta_hat
 ```{r}
 
 #Negative Binomial Test
 library(MASS)
 transmission<- read.csv("/Users/manyakaushik/Downloads/transmission_pairs.csv")
-#head(transmission)
+transmission
 
 counts <- aggregate(infectee.case ~ infector.case,data = transmission,FUN = length)
 colnames(counts)<- c("infector.case", "secondary_cases")
 
-#negative binomial model
-nb_model <- glm.nb(secondary_cases ~ 1, data = counts)
-summary(nb_model)
+fit <- glm.nb(counts$secondary_cases ~ 1)
+fit$theta
+exp(coef(fit))
 
-#avg infected individual produces about 1.86 secondary cases 
-exp((coef(nb_model)))
+#Dispersion parameter: theta= 7.24, suggesting that transmission not totally uniform, but transmission data is also not totally super spreading, showing that COVID-19 spreads more normally most of the time 
+
+#Lambda = 1.86, mean number of secondary cases per infector (R: basic reproduction number)
+#R>1; outbreak is in the growing phase 
+
+AIC(fit) 
+```
+
+```{r}
+prop.table(table(transmission$cluster.risk))
+tbl<-table(transmission$cluster.risk,transmission$agegroup.infector )
 
 
-AIC(nb_model) 
-#Dispersion parameter: theta= 7.24, suggesting that transmission not totally uniform, but transmission data is also not totally super spreading 
+#HO: there is no assiocation between cluster risk type and infector age group
+#HA: there is an association between cluster risk type and infector age group
+fisher.test(tbl, simulate.p.value = TRUE, B = 10000)
 
 
+#reject the null: there is statistically significant evidence of an association between the cluster type (family, social, travel, work) and age group of infector 
+#The distribution of transmission cluster risks differs meaningfully across infector age groups
 
 
+prop.table(tbl, margin =2)
 
-
-
-
+#columns show distribution of cluster risk types within each infector age group.
+#showcases how Age group 1 and 3: 100% in family clusters -- young infectors in family settings
+#Age 7-8: social clusters -- social transmission occurs in middle age groups 
 
 ```
