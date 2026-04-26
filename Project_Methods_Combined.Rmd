@@ -1,0 +1,382 @@
+---
+title: "Dissecting Transmission: The Beta-Poisson Model"
+author: "Francesca Hammerstein, Nathan Hogg, Manya Kaushik"
+date: "2026-04-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Data Preparation
+
+Source: Adam et al. "Clustering and superspreading potential of SARS-CoV-2 infections in Hong Kong." *Nature Medicine* (2020). doi: https://doi.org/10.1038/s41591-020-1092-0
+
+```{r data}
+pairs <- read.csv("transmission_pairs.csv")
+
+# Count secondary cases per infector
+infector_counts <- table(pairs$infector.case)
+
+# Identify terminal cases (infectees who never infect anyone) — these are zeros
+all_infectees <- unique(pairs$infectee.case)
+all_infectors <- unique(pairs$infector.case)
+terminal_cases <- setdiff(all_infectees, all_infectors)
+
+# Build full secondary case vector including zeros
+secondary_cases <- c(as.integer(infector_counts), rep(0, length(terminal_cases)))
+
+# Frequency table
+freq_table <- as.data.frame(table(secondary_cases))
+colnames(freq_table) <- c("secondary_cases", "frequency")
+freq_table$secondary_cases <- as.integer(as.character(freq_table$secondary_cases))
+print(freq_table)
+
+# Expanded raw data vector for model fitting
+raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
+
+cat("\nTotal individuals:", length(raw_data), "\n")
+cat("Mean secondary cases (R):", mean(raw_data), "\n")
+cat("Variance:", var(raw_data), "\n")
+cat("Proportion of zeros:", mean(raw_data == 0), "\n")
+```
+
+# 2. Model Fitting
+
+## 2.1 Poisson MLE (Francesca)
+
+```{r poisson}
+lambda_poi <- mean(raw_data)
+loglik_poi <- sum(dpois(raw_data, lambda_poi, log = TRUE))
+aic_poi <- 2 * 1 - 2 * loglik_poi
+
+cat(" Poisson MLE Results \n")
+cat("Lambda:", lambda_poi, "\n")
+cat("Log-likelihood:", loglik_poi, "\n")
+cat("AIC:", aic_poi, "\n")
+```
+
+## 2.2 Geometric MLE (Francesca)
+
+```{r geometric}
+lambda_geo <- mean(raw_data)
+loglik_geo <- sum(dgeom(raw_data, prob = 1 / (1 + lambda_geo), log = TRUE))
+aic_geo <- 2 * 1 - 2 * loglik_geo
+
+cat(" Geometric MLE Results \n")
+cat("Lambda:", lambda_geo, "\n")
+cat("Log-likelihood:", loglik_geo, "\n")
+cat("AIC:", aic_geo, "\n")
+```
+
+## 2.3 Negative Binomial MLE (Manya)
+
+```{r negbin}
+lambda_nb <- mean(raw_data)
+
+nb_negloglik <- function(theta, data) {
+  -sum(dnbinom(data, size = theta, mu = mean(data), log = TRUE))
+}
+
+nb_fit <- optim(par = 1, fn = nb_negloglik, data = raw_data,
+                method = "L-BFGS-B", lower = 1e-6)
+
+theta_hat <- nb_fit$par
+loglik_nb <- -nb_fit$value
+aic_nb <- 2 * 2 - 2 * loglik_nb
+
+cat(" Negative Binomial MLE Results \n")
+cat("Lambda (mean):", lambda_nb, "\n")
+cat("Theta (overdispersion):", theta_hat, "\n")
+cat("Log-likelihood:", loglik_nb, "\n")
+cat("AIC:", aic_nb, "\n")
+```
+
+## 2.4 Zero-Inflated Poisson MLE (Nathan)
+
+```{r zip}
+# Log-Likelihood Function
+zip_loglik <- function(params, data) {
+  lambda <- params[1]
+  sigma <- params[2]
+  
+  if (lambda <= 0 || sigma <= 0 || sigma >= 1) return(-Inf)
+  
+  zeros <- data[data == 0]
+  nonzeros <- data[data > 0]
+  
+  ll_zeros <- length(zeros) * log(sigma + (1 - sigma) * exp(-lambda))
+  ll_nonzeros <- sum(log(1 - sigma) + dpois(nonzeros, lambda, log = TRUE))
+  
+  return(ll_zeros + ll_nonzeros)
+}
+
+zip_negloglik <- function(params, data) {
+  return(-zip_loglik(params, data))
+}
+
+fit_zip <- function(data) {
+  p_zero <- mean(data == 0)
+  start_sigma <- max(0.01, min(0.99, p_zero - 0.1))
+  start_lambda <- mean(data) / (1 - start_sigma)
+  
+  result <- optim(
+    par = c(start_lambda, start_sigma),
+    fn = zip_negloglik,
+    data = data,
+    method = "L-BFGS-B",
+    lower = c(1e-6, 1e-6),
+    upper = c(Inf, 1 - 1e-6),
+    hessian = TRUE
+  )
+  
+  lambda_hat <- result$par[1]
+  sigma_hat <- result$par[2]
+  loglik <- -result$value
+  aic <- 2 * 2 - 2 * loglik
+  
+  cat(" ZIP MLE Results \n")
+  cat("Lambda (Poisson Mean):", lambda_hat, "\n")
+  cat("Sigma (Zero-Inflation):", sigma_hat, "\n")
+  cat("Log-Likelihood:", loglik, "\n")
+  cat("AIC:", aic, "\n")
+  cat("Overall mean (lambda * (1 - sigma)):", lambda_hat * (1 - sigma_hat), "\n")
+  
+  return(list(lambda = lambda_hat, sigma = sigma_hat, loglik = loglik, aic = aic))
+}
+
+zip_result <- fit_zip(raw_data)
+
+# Predicted vs observed zeros
+n <- length(raw_data)
+predicted_zero_prop <- zip_result$sigma + (1 - zip_result$sigma) * exp(-zip_result$lambda)
+cat("\nObserved zero proportion:", mean(raw_data == 0), "\n")
+cat("Predicted zero proportion:", predicted_zero_prop, "\n")
+```
+
+## 2.5 Beta-Poisson MLE (Nathan)
+
+```{r betapoisson}
+bp_pmf <- function(x, lambda, phi, nu) {
+  N <- 1 / nu
+  alpha1 <- lambda * phi
+  alpha2 <- (N - lambda) * phi
+  
+  if (alpha1 <= 0 || alpha2 <= 0 || N <= lambda) return(rep(-Inf, length(x)))
+  
+  sapply(x, function(k) {
+    f <- function(p) dpois(k, lambda = p * N) * dbeta(p, alpha1, alpha2)
+    val <- tryCatch(integrate(f, 0, 1, rel.tol = 1e-8)$value,
+                    error = function(e) 0)
+    if (val <= 0) return(-Inf)
+    log(val)
+  })
+}
+
+bp_negloglik <- function(params, data, lambda) {
+  phi <- params[1]
+  nu <- params[2]
+  if (phi <= 0 || nu <= 0 || nu >= 1/lambda) return(1e10)
+  ll <- sum(bp_pmf(data, lambda, phi, nu))
+  if (is.na(ll) || is.infinite(ll)) return(1e10)
+  return(-ll)
+}
+
+fit_bp <- function(data) {
+  lambda <- mean(data)
+  best <- list(value = 1e10)
+  
+  for (sp in c(0.1, 0.5, 1, 5)) {
+    for (sn in c(0.01, 0.1, 0.5)) {
+      sv <- sn / lambda
+      if (sv >= 1/lambda) next
+      
+      res <- tryCatch(
+        optim(c(sp, sv), bp_negloglik, data = data, lambda = lambda,
+              method = "L-BFGS-B",
+              lower = c(1e-6, 1e-8),
+              upper = c(100, 1/lambda - 1e-6)),
+        error = function(e) list(value = 1e10))
+      
+      if (res$value < best$value) best <- res
+    }
+  }
+  
+  phi_hat <- best$par[1]
+  nu_hat <- best$par[2]
+  N_hat <- 1 / nu_hat
+  loglik <- -best$value
+  aic <- 6 - 2 * loglik
+  
+  cat(" Beta-Poisson MLE Results \n")
+  cat("Lambda (mean):", lambda, "\n")
+  cat("Phi (overdispersion):", phi_hat, "\n")
+  cat("Nu (inverse contacts):", nu_hat, "\n")
+  cat("N (mean contacts):", N_hat, "\n")
+  cat("Log-likelihood:", loglik, "\n")
+  cat("AIC:", aic, "\n")
+  
+  if (nu_hat < 0.01) {
+    cat("\nNote: Nu ~ 0 (N -> Inf), beta-Poisson has converged to its\n")
+    cat("negative binomial limit with theta =", 1/phi_hat, "\n")
+  }
+  
+  return(list(lambda = lambda, phi = phi_hat, nu = nu_hat,
+              N = N_hat, loglik = loglik, aic = aic))
+}
+
+bp_result <- fit_bp(raw_data)
+```
+
+# 3. Model Comparison (Francesca)
+
+```{r comparison}
+comparison <- data.frame(
+  Model = c("Poisson", "Geometric", "Neg Binomial", "ZIP", "Beta-Poisson"),
+  Parameters = c(1, 1, 2, 2, 3),
+  LogLik = c(loglik_poi, loglik_geo, loglik_nb,
+             zip_result$loglik, bp_result$loglik),
+  AIC = c(aic_poi, aic_geo, aic_nb,
+          zip_result$aic, bp_result$aic)
+)
+comparison <- comparison[order(comparison$AIC), ]
+
+cat(" AIC Model Comparison \n")
+print(comparison, row.names = FALSE)
+```
+
+# 4. Branching Process Simulation (Nathan)
+
+```{r branching}
+simulate_outbreak <- function(rfunc, n_gen = 20, n_index = 1) {
+  cases_per_gen <- numeric(n_gen)
+  cases_per_gen[1] <- n_index
+  total_cases <- n_index
+  
+  for (g in 2:n_gen) {
+    if (cases_per_gen[g - 1] == 0) break
+    new_cases <- sum(rfunc(cases_per_gen[g - 1]))
+    cases_per_gen[g] <- new_cases
+    total_cases <- total_cases + new_cases
+  }
+  return(list(total = total_cases, by_gen = cases_per_gen))
+}
+
+# Random draw functions
+r_zip <- function(n) {
+  is_zero <- rbinom(n, 1, zip_result$sigma)
+  ifelse(is_zero, 0, rpois(n, zip_result$lambda))
+}
+
+r_betapois <- function(n) {
+  N <- 1 / bp_result$nu
+  alpha1 <- bp_result$lambda * bp_result$phi
+  alpha2 <- (N - bp_result$lambda) * bp_result$phi
+  p <- rbeta(n, alpha1, alpha2)
+  rpois(n, p * N)
+}
+
+# Simulate
+n_sims <- 10000
+n_gen <- 20
+zip_sizes <- numeric(n_sims)
+bp_sizes <- numeric(n_sims)
+
+set.seed(42)
+for (i in 1:n_sims) {
+  zip_sizes[i] <- simulate_outbreak(r_zip, n_gen)$total
+  bp_sizes[i] <- simulate_outbreak(r_betapois, n_gen)$total
+}
+
+cat(" Branching Process Results (", n_sims, "simulations) \n\n")
+
+cat("--- ZIP ---\n")
+cat("Mean outbreak size:", mean(zip_sizes), "\n")
+cat("Median outbreak size:", median(zip_sizes), "\n")
+cat("Max outbreak size:", max(zip_sizes), "\n")
+cat("P(extinction by gen", n_gen, "):", mean(zip_sizes < 50), "\n")
+cat("P(outbreak > 10 cases):", mean(zip_sizes > 10), "\n\n")
+
+cat("--- Beta-Poisson ---\n")
+cat("Mean outbreak size:", mean(bp_sizes), "\n")
+cat("Median outbreak size:", median(bp_sizes), "\n")
+cat("Max outbreak size:", max(bp_sizes), "\n")
+cat("P(extinction by gen", n_gen, "):", mean(bp_sizes < 50), "\n")
+cat("P(outbreak > 10 cases):", mean(bp_sizes > 10), "\n\n")
+
+# Superspreading analysis
+R <- mean(raw_data)
+ss_threshold <- qpois(0.99, R)
+cat(" Superspreading Analysis \n")
+cat("R (mean):", R, "\n")
+cat("Superspreading threshold (99th %ile of Poi(R)):", ss_threshold, "\n")
+cat("Observed superspreaders:", sum(raw_data > ss_threshold), "/", length(raw_data), "\n")
+cat("Observed superspreader proportion:", mean(raw_data > ss_threshold), "\n")
+
+# Plots
+par(mfrow = c(1, 2))
+hist(zip_sizes, breaks = 50, main = "ZIP: Outbreak Sizes",
+     xlab = "Total cases", col = "steelblue", border = "white")
+abline(v = mean(zip_sizes), col = "red", lwd = 2, lty = 2)
+
+hist(bp_sizes, breaks = 50, main = "Beta-Poisson: Outbreak Sizes",
+     xlab = "Total cases", col = "darkorange", border = "white")
+abline(v = mean(bp_sizes), col = "red", lwd = 2, lty = 2)
+```
+
+# 5. Original Analysis: Stratified Transmission by Setting (Manya)
+
+```{r stratified}
+# Assign each infector their primary transmission setting
+infector_settings <- aggregate(cluster.risk ~ infector.case, data = pairs,
+                                FUN = function(x) names(sort(table(x), decreasing = TRUE))[1])
+
+infector_sec <- data.frame(
+  infector = names(infector_counts),
+  secondary_cases = as.integer(infector_counts)
+)
+
+infector_info <- merge(infector_sec, infector_settings,
+                        by.x = "infector", by.y = "infector.case", all.x = TRUE)
+
+cat(" Counts per Setting \n")
+print(table(infector_info$cluster.risk))
+
+cat("\n Summary by Setting \n")
+for (setting in c("family", "social", "work")) {
+  subset_data <- infector_info$secondary_cases[infector_info$cluster.risk == setting]
+  if (length(subset_data) < 5) next
+  
+  lambda_s <- mean(subset_data)
+  
+  nb_fit_s <- tryCatch(
+    optim(par = 1, fn = function(theta, data) {
+      -sum(dnbinom(data, size = theta, mu = mean(data), log = TRUE))
+    }, data = subset_data, method = "L-BFGS-B", lower = 1e-6),
+    error = function(e) NULL
+  )
+  
+  if (!is.null(nb_fit_s)) {
+    cat("\n---", setting, "(n =", length(subset_data), ") ---\n")
+    cat("Mean (R):", lambda_s, "\n")
+    cat("Theta:", nb_fit_s$par, "\n")
+    cat("Variance:", var(subset_data), "\n")
+    cat("Overdispersion ratio (var/mean):", var(subset_data) / lambda_s, "\n")
+  }
+}
+```
+
+```{r fisher}
+# Fisher's exact test: association between transmission setting and age group
+tbl <- table(pairs$cluster.risk, pairs$agegroup.infector)
+
+cat(" Fisher's Exact Test \n")
+cat("H0: No association between cluster risk type and infector age group\n")
+cat("H1: Association exists\n\n")
+fisher_result <- fisher.test(tbl, simulate.p.value = TRUE, B = 10000)
+print(fisher_result)
+
+cat("\n Proportions of Setting by Age Group \n")
+print(round(prop.table(tbl, margin = 2), 3))
+```
