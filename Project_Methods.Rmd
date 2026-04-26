@@ -36,7 +36,7 @@ raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
 
 ```
 
-# ZIP Distributions
+# ZIP Distributions (Nathan)
 Application of Zero Inflated Poisson (ZIP) distribution to model the number of secondary cases per infector, accounting for excess zeros in the data.
 ## Results
 Lambda (Poisson Mean): 1.398481 
@@ -141,7 +141,7 @@ cat("Predicted zero count:", round(predicted_zero_prop * n), "out of", n, "\n")
 ```
 
 
-# Beta-Poisson Mixture Modeling
+# Beta-Poisson Mixture Modeling (Nathan)
 
 ```{r}
 # Beta-Poisson Mixture Model
@@ -218,7 +218,7 @@ bp_result <- fit_bp(raw_data)
 
 ```
 
-# MLE
+# MLE (Manya)
 ```{r}
 # Negative Binomial MLE
 lambda_nb <- mean(raw_data)
@@ -274,9 +274,8 @@ print(comparison, row.names = FALSE)
 ```
 
 
-# Maximum Likelihood Estimation
 
-# Branching Process
+# Branching Process (Nathan)
 ```{r}
 # Branching Process Simulation
 
@@ -366,7 +365,61 @@ abline(v = mean(bp_sizes), col = "red", lwd = 2, lty = 2)
 
 ```
 
+```{r}
+transmissiondata <- read.csv("transmission_pairs.csv")
+data_vec <- aggregate(infectee.case ~ infector.case,data = transmissiondata,FUN = length)
+colnames(data_vec)<- c("infector.case", "secondary_cases")
+```
 
+# MLE (Francsca)
+```{r}
+library(MASS)
+
+y <- data_vec$secondary_cases
+
+#Poisson Model
+fit_pois <- glm(y ~ 1, family = "poisson")
+aic_pois <- AIC(fit_pois)
+
+#Negative Binomial Model
+fit_nb <- glm.nb(y ~ 1)
+aic_nb <- AIC(fit_nb)
+
+cat("Poisson AIC:", aic_pois, "\n")
+cat("Neg Binomial AIC:", aic_nb, "\n")
+library(hypergeo)
+
+beta_pois_nll <- function(params, data) {
+  lambda <- params[1]
+  phi    <- params[2]
+  N      <- params[3]
+  
+  if (lambda <= 0 || phi <= 0 || N <= lambda) return(1e10)
+  
+  a1 <- lambda * phi
+  a2 <- (N - lambda) * phi
+  
+  log_probs <- sapply(data, function(x) {
+    log_const <- x * log(N) - lfactorial(x)
+    
+    log_beta_ratio <- (lbeta(a1 + x, a2) - lbeta(a1, a2))
+    f1f1 <- Re(genhypergeo(U = a1 + x, L = a1 + a2 + x, z = -N))
+    
+    return(log_const + log_beta_ratio + log(f1f1 + 1e-10))
+  })
+  
+  return(-sum(log_probs))
+}
+
+#Beta-Poisson Model
+fit_bp <- optim(par = c(mean(y), 1, max(y) + 1), 
+                fn = beta_pois_nll, 
+                data = y,
+                method = "Nelder-Mead")
+
+aic_bp <- 2 * 3 + 2 * fit_bp$value
+cat("Beta-Poisson AIC:", aic_bp, "\n")
+```
 
 
 
