@@ -1,0 +1,91 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-04-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Source: Adam et al. "Clustering and superspreading potential of SARS-CoV-2 infections in Hong Kong." *Nature Medicine* (2020). doi: https://doi.org/10.1038/s41591-020-1092-0
+
+```{r data}
+pairs <- read.csv("/Users/franhammerstein/Downloads/transmission_pairs.csv")
+
+# Count secondary cases per infector
+infector_counts <- table(pairs$infector.case)
+
+# Identify terminal cases (infectees who never infect anyone) — these are zeros
+all_infectees <- unique(pairs$infectee.case)
+all_infectors <- unique(pairs$infector.case)
+terminal_cases <- setdiff(all_infectees, all_infectors)
+
+# Build full secondary case vector including zeros
+secondary_cases <- c(as.integer(infector_counts), rep(0, length(terminal_cases)))
+
+# Frequency table
+freq_table <- as.data.frame(table(secondary_cases))
+colnames(freq_table) <- c("secondary_cases", "frequency")
+freq_table$secondary_cases <- as.integer(as.character(freq_table$secondary_cases))
+print(freq_table)
+
+# Expanded raw data vector for model fitting
+raw_data <- rep(freq_table$secondary_cases, freq_table$frequency)
+
+cat("\nTotal individuals:", length(raw_data), "\n")
+cat("Mean secondary cases (R):", mean(raw_data), "\n")
+cat("Variance:", var(raw_data), "\n")
+cat("Proportion of zeros:", mean(raw_data == 0), "\n")
+```
+
+```{r poisson}
+lambda_poi <- mean(raw_data)
+loglik_poi <- sum(dpois(raw_data, lambda_poi, log = TRUE))
+aic_poi <- 2 * 1 - 2 * loglik_poi
+
+cat(" Poisson MLE Results \n")
+cat("Lambda:", lambda_poi, "\n")
+cat("Log-likelihood:", loglik_poi, "\n")
+cat("AIC:", aic_poi, "\n")
+```
+```{r geometric}
+lambda_geo <- mean(raw_data)
+loglik_geo <- sum(dgeom(raw_data, prob = 1 / (1 + lambda_geo), log = TRUE))
+aic_geo <- 2 * 1 - 2 * loglik_geo
+
+cat(" Geometric MLE Results \n")
+cat("Lambda:", lambda_geo, "\n")
+cat("Log-likelihood:", loglik_geo, "\n")
+cat("AIC:", aic_geo, "\n")
+```
+```{r}
+observed_counts <- table(raw_data) / length(raw_data)
+max_val <- max(as.numeric(names(observed_counts)))
+x_range <- 0:max_val
+
+y_poisson <- dpois(x_range, lambda = lambda_poi)
+
+p_geo <- 1 / (1 + lambda_geo)
+y_geometric <- dgeom(x_range, prob = p_geo)
+
+plot(observed_counts, type ="h", lwd = 5, col = "gray", 
+     main = "Model Comparison: Poisson vs Geometric",
+     xlab = "Secondary Cases", ylab = "Probability", ylim = c(0, max(observed_counts, y_geometric) * 1.1))
+
+lines(x_range, y_poisson, type = "b", col = "brown1", pch = 16, lwd = 2)
+lines(x_range, y_geometric, type = "b", col = "skyblue2", pch = 17, lwd = 2)
+
+legend ("topright", legend = c("Observed Data", "Poisson Fit", "Geometric Fit"),
+        col = c ("gray", "brown1", "skyblue2"), lwd = 2, pch = c(NA, 16, 17))
+```
+
+
+
+
+
+
+
+
+
+
